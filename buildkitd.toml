@@ -1,0 +1,3 @@
+[registry."sugapack-registry:5000"]
+  http = true
+  insecure = true
