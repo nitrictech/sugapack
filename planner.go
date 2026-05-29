@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/railwayapp/railpack/core"
 	"github.com/railwayapp/railpack/core/app"
+	"github.com/railwayapp/railpack/core/logger"
 )
 
 // PlannerOptions configures the embedded railpack plan generation.
@@ -37,8 +39,9 @@ func runPlanner(opts PlannerOptions) error {
 	}
 
 	result := core.GenerateBuildPlan(a, env, genOpts)
+	printRailpackLogs(os.Stderr, result.Logs)
 	if !result.Success {
-		return fmt.Errorf("plan generation failed: %v", result.Logs)
+		return fmt.Errorf("plan generation failed: %s", railpackErrorSummary(result.Logs))
 	}
 
 	planBytes, err := json.MarshalIndent(result.Plan, "", "  ")
@@ -56,6 +59,40 @@ func runPlanner(opts PlannerOptions) error {
 
 	fmt.Fprintf(os.Stderr, "Plan written to %s\n", opts.OutputFile)
 	return nil
+}
+
+// printRailpackLogs writes railpack logger messages to w, one per line,
+// tagged with their level. Replaces Go's default %v rendering of []logger.Msg,
+// which is unreadable when surfaced through BuildKit step output.
+func printRailpackLogs(w io.Writer, logs []logger.Msg) {
+	for _, msg := range logs {
+		fmt.Fprintf(w, "[%s] %s\n", msg.Level, msg.Msg)
+	}
+}
+
+// railpackErrorSummary returns a one-line summary of error messages from the
+// railpack logs, suitable for the final error returned to the caller. The full
+// log is expected to have already been printed via printRailpackLogs.
+func railpackErrorSummary(logs []logger.Msg) string {
+	var first string
+	count := 0
+	for _, msg := range logs {
+		if msg.Level != logger.Error {
+			continue
+		}
+		count++
+		if first == "" {
+			first = msg.Msg
+		}
+	}
+	switch count {
+	case 0:
+		return "no error details reported by railpack"
+	case 1:
+		return first
+	default:
+		return fmt.Sprintf("%s (and %d more error(s))", first, count-1)
+	}
 }
 
 func getDir(path string) string {
