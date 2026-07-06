@@ -45,7 +45,7 @@ func runPlanner(opts PlannerOptions) error {
 		RailpackVersion: railpackVersion(),
 	}
 
-	result, err := core.GenerateBuildPlan(a, env, genOpts)
+	result := generateBuildPlan(a, env, genOpts, sugapackProviders())
 	if result != nil {
 		printRailpackLogs(os.Stderr, result.Logs)
 	}
