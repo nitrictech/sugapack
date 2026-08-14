@@ -3,10 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/railwayapp/railpack/core"
 	"github.com/railwayapp/railpack/core/app"
+	"github.com/railwayapp/railpack/core/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,31 +34,40 @@ func planFor(t *testing.T, dir string) *core.BuildResult {
 	return result
 }
 
-// A TanStack Start app (Vite-based) with no `start` script is classified as a
-// static SPA. The provenance wrapper should explain why and warn that a
-// server-capable framework was built as a SPA.
-func TestNodeProvenance_TanStackStartTreatedAsSPA(t *testing.T) {
+// warnings joins the warning-level messages railpack logged during planning.
+func warnings(result *core.BuildResult) string {
+	var msgs []string
+	for _, msg := range result.Logs {
+		if msg.Level == logger.Warn {
+			msgs = append(msgs, msg.Msg)
+		}
+	}
+	return strings.Join(msgs, "\n")
+}
+
+// A Vite app with no start script is deployed as a static site. The wrapper
+// should say so, name the directory Caddy will serve, and say how to opt out.
+func TestNodeStaticSiteWarning(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"package.json": `{
-			"name": "tanstack-app",
+			"name": "vite-app",
 			"scripts": { "build": "vite build" },
-			"dependencies": { "vite": "^5.0.0", "@tanstack/react-start": "^1.0.0" }
+			"dependencies": { "vite": "^5.0.0" }
 		}`,
 		"vite.config.ts": `export default {}`,
 	})
 
 	result := planFor(t, dir)
 	require.True(t, result.Success, "plan generation should succeed")
+	require.Equal(t, "true", result.Metadata["nodeIsSPA"])
 
-	require.Equal(t, "spa", result.Metadata["provenance.node.classification"])
-	require.Equal(t, "vite", result.Metadata["provenance.node.spaFramework"])
-	require.Contains(t, result.Metadata["provenance.node.reason"], "static SPA")
-	require.Contains(t, result.Metadata["provenance.node.hint"], "start")
+	warned := warnings(result)
+	require.Contains(t, warned, "/app/dist", "warning does not name the served directory")
+	require.Contains(t, warned, "RAILPACK_NO_SPA", "warning does not say how to override detection")
 }
 
-// A plain Node server app (start script, no static framework) should be
-// classified as a server with no SPA hint.
-func TestNodeProvenance_ServerApp(t *testing.T) {
+// A node app with a start script runs a server, so there is nothing to warn about.
+func TestNodeStaticSiteWarningSilentForServerApps(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
 		"package.json": `{
 			"name": "server-app",
@@ -68,7 +79,7 @@ func TestNodeProvenance_ServerApp(t *testing.T) {
 
 	result := planFor(t, dir)
 	require.True(t, result.Success, "plan generation should succeed")
-
-	require.Equal(t, "server", result.Metadata["provenance.node.classification"])
-	require.Empty(t, result.Metadata["provenance.node.hint"])
+	// SetBool only records a key when true, so a server app leaves it unset.
+	require.NotEqual(t, "true", result.Metadata["nodeIsSPA"])
+	require.NotContains(t, warnings(result), "static site")
 }

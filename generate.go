@@ -30,7 +30,7 @@ import (
 // patching railpack itself. Every railpack symbol it touches is exported, so
 // this compiles against an unmodified railpack dependency.
 //
-// Adapted from github.com/railwayapp/railpack v0.23.0 core.GenerateBuildPlan.
+// Adapted from github.com/railwayapp/railpack v0.36.4 core.GenerateBuildPlan.
 // Keep in sync when bumping the railpack version.
 func generateBuildPlan(a *app.App, env *app.Environment, options *core.GenerateBuildPlanOptions, allProviders []providers.Provider) *core.BuildResult {
 	log := logger.NewLogger()
@@ -76,6 +76,13 @@ func generateBuildPlan(a *app.App, env *app.Environment, options *core.GenerateB
 		return &core.BuildResult{Success: false, Logs: log.Logs}
 	}
 
+	railpackVersion := options.RailpackVersion
+	if railpackVersion == "" {
+		railpackVersion = "dev"
+	}
+	// Bake the builder version into the runtime image for observability.
+	buildPlan.Deploy.Variables["RAILPACK_VERSION"] = railpackVersion
+
 	if providerToUse != nil {
 		providerToUse.CleansePlan(buildPlan)
 	}
@@ -88,7 +95,7 @@ func generateBuildPlan(a *app.App, env *app.Environment, options *core.GenerateB
 	}
 
 	return &core.BuildResult{
-		RailpackVersion:   options.RailpackVersion,
+		RailpackVersion:   railpackVersion,
 		Plan:              buildPlan,
 		ResolvedPackages:  resolvedPackages,
 		Metadata:          ctx.Metadata.Properties,
@@ -102,7 +109,7 @@ func generateBuildPlan(a *app.App, env *app.Environment, options *core.GenerateB
 // provider list as a parameter instead of hardcoding GetLanguageProviders().
 // This is the single hook the PR was trying to add upstream.
 //
-// Adapted from github.com/railwayapp/railpack v0.23.0 core.getProviders.
+// Adapted from github.com/railwayapp/railpack v0.36.4 core.getProviders.
 func selectProvider(ctx *generate.GenerateContext, config *c.Config, allProviders []providers.Provider) (providers.Provider, string) {
 	var providerToUse providers.Provider
 	var detectedProvider string
@@ -170,7 +177,7 @@ func capitalizeFirst(s string) string {
 
 // sugapackProviders returns the provider list used for plan generation. It
 // mirrors railpack's providers.GetLanguageProviders() with the Node provider
-// swapped for sugapack's provenance-emitting wrapper. The list is reproduced
+// swapped for sugapack's wrapper. The list is reproduced
 // explicitly (rather than mutating the built-in slice) so the ordering — which
 // determines detection priority — is visible and any upstream drift shows up as
 // a compile error. Keep in sync with GetLanguageProviders when bumping railpack.
@@ -185,7 +192,7 @@ func sugapackProviders() []providers.Provider {
 		&python.PythonProvider{},
 		&deno.DenoProvider{},
 		&dotnet.DotnetProvider{},
-		&nodeProvenanceProvider{}, // wraps node.NodeProvider
+		&sugapackNodeProvider{}, // wraps node.NodeProvider
 		&gleam.GleamProvider{},
 		&cpp.CppProvider{},
 		&staticfile.StaticfileProvider{},
