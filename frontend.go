@@ -54,6 +54,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		SecretsHash: opts["build-arg:secrets-hash"],
 		CacheKey:    opts["build-arg:cache-key"],
 		GitHubToken: opts["build-arg:github-token"],
+		NoCache:     noCacheRequested(opts),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("converting plan to LLB: %w", err)
@@ -211,6 +212,13 @@ func buildPlanArgs(config Config) []string {
 		args = append(args, "-e", k+"="+v)
 	}
 	return args
+}
+
+// noCacheRequested reports whether the client asked for a cacheless build.
+// BuildKit sets the "no-cache" frontend opt with an empty value for `--no-cache`.
+func noCacheRequested(opts map[string]string) bool {
+	_, ok := opts["no-cache"]
+	return ok
 }
 
 // parsePlatform extracts the target platform from build options, defaulting to linux/amd64.

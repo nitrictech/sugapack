@@ -5,19 +5,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"github.com/railwayapp/railpack/core"
 	"github.com/railwayapp/railpack/core/app"
 	"github.com/railwayapp/railpack/core/logger"
+	"github.com/railwayapp/railpack/core/plan"
 )
+
+// railpackModulePath is the vendored builder, reported in plan logs and baked
+// into the image as RAILPACK_VERSION.
+const railpackModulePath = "github.com/railwayapp/railpack"
 
 // PlannerOptions configures the embedded railpack plan generation.
 type PlannerOptions struct {
-	SourceDir string
+	SourceDir  string
 	OutputFile string
-	BuildCmd  string
-	StartCmd  string
-	Envs      []string
+	BuildCmd   string
+	StartCmd   string
+	Envs       []string
 }
 
 // runPlanner runs railpack plan generation as a Go library call
@@ -34,15 +41,26 @@ func runPlanner(opts PlannerOptions) error {
 	}
 
 	genOpts := &core.GenerateBuildPlanOptions{
-		BuildCommand: opts.BuildCmd,
-		StartCommand: opts.StartCmd,
+		BuildCommand:    opts.BuildCmd,
+		StartCommand:    opts.StartCmd,
+		RailpackVersion: railpackVersion(),
 	}
 
-	result := core.GenerateBuildPlan(a, env, genOpts)
-	printRailpackLogs(os.Stderr, result.Logs)
+	result, err := core.GenerateBuildPlan(a, env, genOpts)
+	if result != nil {
+		printRailpackLogs(os.Stderr, result.Logs)
+	}
+	if err != nil {
+		// Transient failure (e.g. mise could not be reached), worth retrying.
+		return fmt.Errorf("plan generation failed, this may be transient: %w", err)
+	}
 	if !result.Success {
 		return fmt.Errorf("plan generation failed: %s", railpackErrorSummary(result.Logs))
 	}
+
+	fmt.Fprintf(os.Stderr, "[info] planned with railpack %s (providers: %s)\n",
+		result.RailpackVersion, providerSummary(result.DetectedProviders))
+	printStaticSiteAssumption(os.Stderr, result)
 
 	planBytes, err := json.MarshalIndent(result.Plan, "", "  ")
 	if err != nil {
@@ -68,6 +86,72 @@ func printRailpackLogs(w io.Writer, logs []logger.Msg) {
 	for _, msg := range logs {
 		fmt.Fprintf(w, "[%s] %s\n", msg.Level, msg.Msg)
 	}
+}
+
+// railpackVersion reports the vendored railpack version, read from the build
+// info so it cannot drift from what go.mod actually requires.
+func railpackVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, dep := range info.Deps {
+		if dep.Path == railpackModulePath {
+			return dep.Version
+		}
+	}
+	return "unknown"
+}
+
+func providerSummary(providers []string) string {
+	named := make([]string, 0, len(providers))
+	for _, p := range providers {
+		if p != "" {
+			named = append(named, p)
+		}
+	}
+	if len(named) == 0 {
+		return "none detected"
+	}
+	return strings.Join(named, ", ")
+}
+
+// printStaticSiteAssumption spells out the single riskiest guess detection
+// makes: that a frontend app is a static site with no server of its own. When
+// that guess is wrong the build fails much later with a bare `"/app/<dir>":
+// not found`, naming a directory the user never chose, so the assumption and
+// the ways to override it are stated up front.
+func printStaticSiteAssumption(w io.Writer, result *core.BuildResult) {
+	if result.Metadata["nodeIsSPA"] != "true" {
+		return
+	}
+
+	target := "the build output"
+	if dirs := staticOutputDirs(result.Plan); len(dirs) > 0 {
+		target = strings.Join(dirs, ", ")
+	}
+
+	fmt.Fprintf(w, "[warn] Detected a static site: %s will be served by Caddy and no application server will be started.\n", target)
+	fmt.Fprintf(w, "[warn] If this app runs a server (TanStack Start, Next.js SSR, Nuxt, Remix, ...), set a start command for this container, or set RAILPACK_NO_SPA=1 to turn static-site detection off.\n")
+	fmt.Fprintf(w, "[warn] A later \"not found\" error naming that directory means this assumption was wrong.\n")
+}
+
+// staticOutputDirs returns the app-relative directories the deploy step copies
+// out of the build, e.g. "dist" for a Vite SPA. Absolute includes are builder
+// internals (Caddy and its config), not app output.
+func staticOutputDirs(bp *plan.BuildPlan) []string {
+	if bp == nil {
+		return nil
+	}
+	var dirs []string
+	for _, input := range bp.Deploy.Inputs {
+		for _, include := range input.Include {
+			if !strings.HasPrefix(include, "/") {
+				dirs = append(dirs, workingDir+"/"+include)
+			}
+		}
+	}
+	return dirs
 }
 
 // railpackErrorSummary returns a one-line summary of error messages from the
