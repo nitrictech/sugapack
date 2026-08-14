@@ -5,19 +5,25 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"github.com/railwayapp/railpack/core"
 	"github.com/railwayapp/railpack/core/app"
 	"github.com/railwayapp/railpack/core/logger"
 )
 
+// railpackModulePath is the vendored builder, reported in plan logs and baked
+// into the image as RAILPACK_VERSION.
+const railpackModulePath = "github.com/railwayapp/railpack"
+
 // PlannerOptions configures the embedded railpack plan generation.
 type PlannerOptions struct {
-	SourceDir string
+	SourceDir  string
 	OutputFile string
-	BuildCmd  string
-	StartCmd  string
-	Envs      []string
+	BuildCmd   string
+	StartCmd   string
+	Envs       []string
 }
 
 // runPlanner runs railpack plan generation as a Go library call
@@ -34,15 +40,25 @@ func runPlanner(opts PlannerOptions) error {
 	}
 
 	genOpts := &core.GenerateBuildPlanOptions{
-		BuildCommand: opts.BuildCmd,
-		StartCommand: opts.StartCmd,
+		BuildCommand:    opts.BuildCmd,
+		StartCommand:    opts.StartCmd,
+		RailpackVersion: railpackVersion(),
 	}
 
-	result := core.GenerateBuildPlan(a, env, genOpts)
-	printRailpackLogs(os.Stderr, result.Logs)
+	result, err := core.GenerateBuildPlan(a, env, genOpts)
+	if result != nil {
+		printRailpackLogs(os.Stderr, result.Logs)
+	}
+	if err != nil {
+		// Transient failure (e.g. mise could not be reached), worth retrying.
+		return fmt.Errorf("plan generation failed, this may be transient: %w", err)
+	}
 	if !result.Success {
 		return fmt.Errorf("plan generation failed: %s", railpackErrorSummary(result.Logs))
 	}
+
+	fmt.Fprintf(os.Stderr, "[info] planned with railpack %s (providers: %s)\n",
+		result.RailpackVersion, providerSummary(result.DetectedProviders))
 
 	planBytes, err := json.MarshalIndent(result.Plan, "", "  ")
 	if err != nil {
@@ -68,6 +84,34 @@ func printRailpackLogs(w io.Writer, logs []logger.Msg) {
 	for _, msg := range logs {
 		fmt.Fprintf(w, "[%s] %s\n", msg.Level, msg.Msg)
 	}
+}
+
+// railpackVersion reports the vendored railpack version, read from the build
+// info so it cannot drift from what go.mod actually requires.
+func railpackVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, dep := range info.Deps {
+		if dep.Path == railpackModulePath {
+			return dep.Version
+		}
+	}
+	return "unknown"
+}
+
+func providerSummary(providers []string) string {
+	named := make([]string, 0, len(providers))
+	for _, p := range providers {
+		if p != "" {
+			named = append(named, p)
+		}
+	}
+	if len(named) == 0 {
+		return "none detected"
+	}
+	return strings.Join(named, ", ")
 }
 
 // railpackErrorSummary returns a one-line summary of error messages from the

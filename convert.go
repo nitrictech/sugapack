@@ -20,6 +20,7 @@ type convertOptions struct {
 	SecretsHash string
 	CacheKey    string
 	GitHubToken string
+	NoCache     bool
 }
 
 // Image is the OCI image config attached to the build result.
@@ -38,7 +39,7 @@ func convertPlanToLLB(bp *plan.BuildPlan, sourceState llb.State, opts convertOpt
 	platform := opts.Platform
 
 	cacheStore := build_llb.NewBuildKitCacheStore(opts.CacheKey)
-	graph, err := build_llb.NewBuildGraph(bp, &sourceState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken)
+	graph, err := build_llb.NewBuildGraph(bp, &sourceState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken, opts.NoCache)
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating build graph: %w", err)
 	}

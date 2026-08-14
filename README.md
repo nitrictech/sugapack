@@ -10,6 +10,17 @@ Sugapack is a BuildKit gRPC frontend that accepts a small JSON config as input (
 2. **Generate plan** — runs railpack's plan generation (embedded as a Go library) on the fetched source
 3. **Execute plan** — converts the plan to LLB using railpack's `build_llb` package, substituting the git source for local context
 
+## The vendored railpack version
+
+Framework support lives in railpack, so the version in `go.mod` is what decides
+whether an app builds. It is reported in the plan step's logs and baked into
+every image as `RAILPACK_VERSION`.
+
+Dependabot opens a weekly PR for railpack on its own (see
+[`.github/dependabot.yml`](.github/dependabot.yml)) so detection fixes are not
+buried in a grouped dependency bump. Framework detection itself is railpack's to
+test; what we check here is our own handling of the plan it produces.
+
 ## Usage
 
 ### With Depot
