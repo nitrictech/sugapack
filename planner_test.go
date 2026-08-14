@@ -1,57 +1,28 @@
 package main
 
 import (
-	"bytes"
 	"strings"
 	"testing"
-
-	"github.com/railwayapp/railpack/core"
-	"github.com/railwayapp/railpack/core/plan"
 )
 
-// staticSitePlan is the shape railpack produces for a Vite SPA: Caddy and its
-// config copied in from absolute paths, plus the app's build output.
-func staticSitePlan() *plan.BuildPlan {
-	bp := plan.NewBuildPlan()
-	bp.Deploy.Inputs = []plan.Layer{
-		{Step: "packages:caddy", Filter: plan.Filter{Include: []string{"/railpack/caddy"}}},
-		{Step: "caddy", Filter: plan.Filter{Include: []string{"/Caddyfile"}}},
-		{Step: "build", Filter: plan.Filter{Include: []string{"dist"}}},
+func TestProviderSummary(t *testing.T) {
+	tests := []struct {
+		name      string
+		providers []string
+		want      string
+	}{
+		{name: "none", providers: nil, want: "none detected"},
+		{name: "empty entry", providers: []string{""}, want: "none detected"},
+		{name: "one", providers: []string{"node"}, want: "node"},
+		{name: "several", providers: []string{"node", "python"}, want: "node, python"},
 	}
-	return bp
-}
 
-func TestPrintStaticSiteAssumption(t *testing.T) {
-	var buf bytes.Buffer
-	printStaticSiteAssumption(&buf, &core.BuildResult{
-		Metadata: map[string]string{"nodeIsSPA": "true"},
-		Plan:     staticSitePlan(),
-	})
-
-	out := buf.String()
-	if !strings.Contains(out, "/app/dist") {
-		t.Errorf("warning does not name the served directory:\n%s", out)
-	}
-	if !strings.Contains(out, "RAILPACK_NO_SPA") {
-		t.Errorf("warning does not say how to override detection:\n%s", out)
-	}
-}
-
-func TestPrintStaticSiteAssumptionSilentForServerApps(t *testing.T) {
-	var buf bytes.Buffer
-	printStaticSiteAssumption(&buf, &core.BuildResult{
-		Metadata: map[string]string{"nodeIsSPA": "false"},
-		Plan:     plan.NewBuildPlan(),
-	})
-	if buf.Len() != 0 {
-		t.Errorf("warned about static site detection for a server app: %s", buf.String())
-	}
-}
-
-func TestStaticOutputDirs(t *testing.T) {
-	got := staticOutputDirs(staticSitePlan())
-	if len(got) != 1 || got[0] != "/app/dist" {
-		t.Errorf("staticOutputDirs() = %v, want [/app/dist]", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := providerSummary(tt.providers); got != tt.want {
+				t.Errorf("providerSummary(%v) = %q, want %q", tt.providers, got, tt.want)
+			}
+		})
 	}
 }
 

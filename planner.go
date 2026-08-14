@@ -11,7 +11,6 @@ import (
 	"github.com/railwayapp/railpack/core"
 	"github.com/railwayapp/railpack/core/app"
 	"github.com/railwayapp/railpack/core/logger"
-	"github.com/railwayapp/railpack/core/plan"
 )
 
 // railpackModulePath is the vendored builder, reported in plan logs and baked
@@ -60,7 +59,6 @@ func runPlanner(opts PlannerOptions) error {
 
 	fmt.Fprintf(os.Stderr, "[info] planned with railpack %s (providers: %s)\n",
 		result.RailpackVersion, providerSummary(result.DetectedProviders))
-	printStaticSiteAssumption(os.Stderr, result)
 
 	planBytes, err := json.MarshalIndent(result.Plan, "", "  ")
 	if err != nil {
@@ -114,44 +112,6 @@ func providerSummary(providers []string) string {
 		return "none detected"
 	}
 	return strings.Join(named, ", ")
-}
-
-// printStaticSiteAssumption spells out the single riskiest guess detection
-// makes: that a frontend app is a static site with no server of its own. When
-// that guess is wrong the build fails much later with a bare `"/app/<dir>":
-// not found`, naming a directory the user never chose, so the assumption and
-// the ways to override it are stated up front.
-func printStaticSiteAssumption(w io.Writer, result *core.BuildResult) {
-	if result.Metadata["nodeIsSPA"] != "true" {
-		return
-	}
-
-	target := "the build output"
-	if dirs := staticOutputDirs(result.Plan); len(dirs) > 0 {
-		target = strings.Join(dirs, ", ")
-	}
-
-	fmt.Fprintf(w, "[warn] Detected a static site: %s will be served by Caddy and no application server will be started.\n", target)
-	fmt.Fprintf(w, "[warn] If this app runs a server (TanStack Start, Next.js SSR, Nuxt, Remix, ...), set a start command for this container, or set RAILPACK_NO_SPA=1 to turn static-site detection off.\n")
-	fmt.Fprintf(w, "[warn] A later \"not found\" error naming that directory means this assumption was wrong.\n")
-}
-
-// staticOutputDirs returns the app-relative directories the deploy step copies
-// out of the build, e.g. "dist" for a Vite SPA. Absolute includes are builder
-// internals (Caddy and its config), not app output.
-func staticOutputDirs(bp *plan.BuildPlan) []string {
-	if bp == nil {
-		return nil
-	}
-	var dirs []string
-	for _, input := range bp.Deploy.Inputs {
-		for _, include := range input.Include {
-			if !strings.HasPrefix(include, "/") {
-				dirs = append(dirs, workingDir+"/"+include)
-			}
-		}
-	}
-	return dirs
 }
 
 // railpackErrorSummary returns a one-line summary of error messages from the
