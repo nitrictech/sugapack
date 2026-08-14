@@ -18,9 +18,8 @@ every image as `RAILPACK_VERSION`.
 
 Dependabot opens a weekly PR for railpack on its own (see
 [`.github/dependabot.yml`](.github/dependabot.yml)) so detection fixes are not
-buried in a grouped dependency bump. The detection tests in `planner_test.go`
-run on those PRs against fixtures in `testdata/`; add a fixture when a framework
-we care about starts mattering.
+buried in a grouped dependency bump. Framework detection itself is railpack's to
+test; what we check here is our own handling of the plan it produces.
 
 ## Usage
 
