@@ -1,4 +1,4 @@
-package main
+package planner
 
 import (
 	"strings"
@@ -63,7 +63,7 @@ func staticOutputDirs(ctx *generate.GenerateContext) []string {
 	for _, layer := range ctx.Deploy.DeployInputs {
 		for _, include := range layer.Include {
 			if !strings.HasPrefix(include, "/") {
-				dirs = append(dirs, workingDir+"/"+include)
+				dirs = append(dirs, WorkingDir+"/"+include)
 			}
 		}
 	}

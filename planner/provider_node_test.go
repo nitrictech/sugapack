@@ -1,4 +1,4 @@
-package main
+package planner
 
 import (
 	"os"
@@ -29,7 +29,7 @@ func planFor(t *testing.T, dir string) *core.BuildResult {
 	a, err := app.NewApp(dir)
 	require.NoError(t, err)
 	env := app.NewEnvironment(nil)
-	result := generateBuildPlan(a, env, &core.GenerateBuildPlanOptions{}, sugapackProviders())
+	result := GenerateBuildPlan(a, env, &core.GenerateBuildPlanOptions{}, DefaultProviders())
 	printRailpackLogs(os.Stderr, result.Logs)
 	return result
 }

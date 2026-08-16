@@ -1,4 +1,7 @@
-package main
+// Package buildkit implements the BuildKit gateway frontend: it reads the
+// sugapack config, fetches source from git, runs plan generation as a build
+// step, and converts the resulting plan into LLB. It runs inside buildkitd.
+package buildkit
 
 import (
 	"context"

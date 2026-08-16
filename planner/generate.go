@@ -1,4 +1,4 @@
-package main
+package planner
 
 import (
 	"strings"
@@ -25,14 +25,19 @@ import (
 	"github.com/railwayapp/railpack/core/providers/staticfile"
 )
 
-// generateBuildPlan mirrors railpack's core.GenerateBuildPlan but accepts an
-// explicit provider list, letting sugapack inject or extend providers without
+// GenerateBuildPlan mirrors railpack's core.GenerateBuildPlan but accepts an
+// explicit provider list, letting callers inject or extend providers without
 // patching railpack itself. Every railpack symbol it touches is exported, so
 // this compiles against an unmodified railpack dependency.
 //
+// It is exported for the same reason it had to be written: railpack keeps the
+// equivalent hook unexported, which is why sugapack reimplements it here.
+// Callers wanting their own providers pass DefaultProviders() with entries
+// added or replaced.
+//
 // Adapted from github.com/railwayapp/railpack v0.36.4 core.GenerateBuildPlan.
 // Keep in sync when bumping the railpack version.
-func generateBuildPlan(a *app.App, env *app.Environment, options *core.GenerateBuildPlanOptions, allProviders []providers.Provider) *core.BuildResult {
+func GenerateBuildPlan(a *app.App, env *app.Environment, options *core.GenerateBuildPlanOptions, allProviders []providers.Provider) *core.BuildResult {
 	log := logger.NewLogger()
 
 	config, err := core.GetConfig(a, env, options, log)
@@ -175,13 +180,16 @@ func capitalizeFirst(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// sugapackProviders returns the provider list used for plan generation. It
+// DefaultProviders returns the provider list used for plan generation. It
 // mirrors railpack's providers.GetLanguageProviders() with the Node provider
-// swapped for sugapack's wrapper. The list is reproduced
-// explicitly (rather than mutating the built-in slice) so the ordering — which
-// determines detection priority — is visible and any upstream drift shows up as
-// a compile error. Keep in sync with GetLanguageProviders when bumping railpack.
-func sugapackProviders() []providers.Provider {
+// swapped for sugapack's wrapper. The list is reproduced explicitly (rather
+// than mutating the built-in slice) so the ordering — which determines
+// detection priority — is visible and any upstream drift shows up as a compile
+// error. Keep in sync with GetLanguageProviders when bumping railpack.
+//
+// The returned slice is freshly built, so callers may reorder or replace
+// entries before handing it to GenerateBuildPlan.
+func DefaultProviders() []providers.Provider {
 	return []providers.Provider{
 		&php.PhpProvider{},
 		&golang.GoProvider{},

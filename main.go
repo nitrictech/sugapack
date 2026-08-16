@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/moby/buildkit/frontend/gateway/grpcclient"
+	"github.com/sugapack/sugapack/buildkit"
+	"github.com/sugapack/sugapack/planner"
 	cli "github.com/urfave/cli/v3"
 )
 
@@ -15,10 +17,10 @@ func main() {
 		Usage: "BuildKit frontend wrapping railpack with remote git source support",
 		Commands: []*cli.Command{
 			{
-				Name:      "frontend",
-				Usage:     "Start the BuildKit gRPC frontend server",
+				Name:  "frontend",
+				Usage: "Start the BuildKit gRPC frontend server",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return grpcclient.RunFromEnvironment(ctx, Build)
+					return grpcclient.RunFromEnvironment(ctx, buildkit.Build)
 				},
 			},
 			{
@@ -51,7 +53,7 @@ func main() {
 					if sourceDir == "" {
 						return fmt.Errorf("source directory is required")
 					}
-					return runPlanner(PlannerOptions{
+					return planner.Run(planner.Options{
 						SourceDir:  sourceDir,
 						OutputFile: cmd.String("out"),
 						BuildCmd:   cmd.String("build-cmd"),
@@ -64,7 +66,7 @@ func main() {
 		// Default action (no subcommand): run as frontend.
 		// This handles the case where BuildKit invokes the binary directly.
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return grpcclient.RunFromEnvironment(ctx, Build)
+			return grpcclient.RunFromEnvironment(ctx, buildkit.Build)
 		},
 	}
 
