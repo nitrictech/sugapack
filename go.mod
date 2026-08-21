@@ -6,7 +6,7 @@ require (
 	github.com/moby/buildkit v0.32.2
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/railwayapp/railpack v0.36.4
-	github.com/urfave/cli/v3 v3.10.1
+	github.com/urfave/cli/v3 v3.11.0
 )
 
 require (
