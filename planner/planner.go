@@ -1,4 +1,7 @@
-package main
+// Package planner generates railpack build plans. It runs inside the build
+// container (via `sugapack plan`), so it depends on railpack only — never on
+// BuildKit.
+package planner
 
 import (
 	"encoding/json"
@@ -17,8 +20,12 @@ import (
 // into the image as RAILPACK_VERSION.
 const railpackModulePath = "github.com/railwayapp/railpack"
 
-// PlannerOptions configures the embedded railpack plan generation.
-type PlannerOptions struct {
+// WorkingDir is where the app's files live in the built image. Plan generation
+// and image assembly both have to agree on it.
+const WorkingDir = "/app"
+
+// Options configures the embedded railpack plan generation.
+type Options struct {
 	SourceDir  string
 	OutputFile string
 	BuildCmd   string
@@ -26,9 +33,9 @@ type PlannerOptions struct {
 	Envs       []string
 }
 
-// runPlanner runs railpack plan generation as a Go library call
+// Run runs railpack plan generation as a Go library call
 // and writes the resulting plan JSON to the output file.
-func runPlanner(opts PlannerOptions) error {
+func Run(opts Options) error {
 	a, err := app.NewApp(opts.SourceDir)
 	if err != nil {
 		return fmt.Errorf("creating app: %w", err)
@@ -45,7 +52,7 @@ func runPlanner(opts PlannerOptions) error {
 		RailpackVersion: railpackVersion(),
 	}
 
-	result, err := core.GenerateBuildPlan(a, env, genOpts)
+	result := GenerateBuildPlan(a, env, genOpts, DefaultProviders())
 	if result != nil {
 		printRailpackLogs(os.Stderr, result.Logs)
 	}
@@ -93,7 +100,14 @@ func railpackVersion() string {
 	if !ok {
 		return "unknown"
 	}
-	for _, dep := range info.Deps {
+	return railpackVersionFrom(info.Deps)
+}
+
+// railpackVersionFrom picks railpack out of a module dependency list. Split
+// from railpackVersion because build info carries no dependency list in a
+// library test binary, so the lookup itself is only testable in isolation.
+func railpackVersionFrom(deps []*debug.Module) string {
+	for _, dep := range deps {
 		if dep.Path == railpackModulePath {
 			return dep.Version
 		}

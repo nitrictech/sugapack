@@ -1,4 +1,4 @@
-package main
+package buildkit
 
 // Config is the JSON document passed as the "Dockerfile" input to the frontend.
 // It tells the frontend where to fetch source and how to configure railpack.

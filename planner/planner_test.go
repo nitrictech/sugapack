@@ -1,7 +1,7 @@
-package main
+package planner
 
 import (
-	"strings"
+	"runtime/debug"
 	"testing"
 )
 
@@ -26,8 +26,16 @@ func TestProviderSummary(t *testing.T) {
 	}
 }
 
-func TestRailpackVersionIsResolved(t *testing.T) {
-	if v := railpackVersion(); !strings.HasPrefix(v, "v") {
-		t.Errorf("railpackVersion() = %q, want a module version", v)
+func TestRailpackVersionFrom(t *testing.T) {
+	deps := []*debug.Module{
+		{Path: "github.com/moby/buildkit", Version: "v0.32.2"},
+		{Path: railpackModulePath, Version: "v0.36.4"},
+	}
+
+	if got := railpackVersionFrom(deps); got != "v0.36.4" {
+		t.Errorf("railpackVersionFrom(deps) = %q, want %q", got, "v0.36.4")
+	}
+	if got := railpackVersionFrom(nil); got != "unknown" {
+		t.Errorf("railpackVersionFrom(nil) = %q, want %q", got, "unknown")
 	}
 }

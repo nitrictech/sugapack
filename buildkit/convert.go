@@ -1,4 +1,4 @@
-package main
+package buildkit
 
 import (
 	"fmt"
@@ -11,9 +11,8 @@ import (
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/railwayapp/railpack/buildkit/build_llb"
 	"github.com/railwayapp/railpack/core/plan"
+	"github.com/sugapack/sugapack/planner"
 )
-
-const workingDir = "/app"
 
 type convertOptions struct {
 	Platform    specs.Platform
@@ -49,7 +48,7 @@ func convertPlanToLLB(bp *plan.BuildPlan, sourceState llb.State, opts convertOpt
 		return nil, nil, fmt.Errorf("generating LLB: %w", err)
 	}
 
-	state := graphOutput.State.Dir(workingDir)
+	state := graphOutput.State.Dir(planner.WorkingDir)
 
 	startCommand := bp.Deploy.StartCmd
 	if startCommand == "" {
@@ -69,7 +68,7 @@ func convertPlanToLLB(bp *plan.BuildPlan, sourceState llb.State, opts convertOpt
 		Variant: platform.Variant,
 		Config: specs.ImageConfig{
 			Env:        buildImageEnv(graphOutput, bp),
-			WorkingDir: workingDir,
+			WorkingDir: planner.WorkingDir,
 			Entrypoint: []string{"/bin/bash", "-c"},
 			Cmd:        []string{startCommand},
 		},
