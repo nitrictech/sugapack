@@ -45,7 +45,19 @@ func main() {
 					&cli.StringSliceFlag{
 						Name:    "env",
 						Aliases: []string{"e"},
-						Usage:   "environment variables (KEY=VAL)",
+						Usage:   "legacy environment variables (KEY=VAL); names stay plan secrets",
+					},
+					&cli.StringSliceFlag{
+						Name:  "build-variable",
+						Usage: "environment variables (KEY=VAL) for the build steps only",
+					},
+					&cli.StringSliceFlag{
+						Name:  "variable",
+						Usage: "environment variables (KEY=VAL) baked into the final image",
+					},
+					&cli.StringSliceFlag{
+						Name:  "secret",
+						Usage: "name of a build-time secret; the value is supplied by BuildKit",
 					},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -54,11 +66,14 @@ func main() {
 						return fmt.Errorf("source directory is required")
 					}
 					return planner.Run(planner.Options{
-						SourceDir:  sourceDir,
-						OutputFile: cmd.String("out"),
-						BuildCmd:   cmd.String("build-cmd"),
-						StartCmd:   cmd.String("start-cmd"),
-						Envs:       cmd.StringSlice("env"),
+						SourceDir:      sourceDir,
+						OutputFile:     cmd.String("out"),
+						BuildCmd:       cmd.String("build-cmd"),
+						StartCmd:       cmd.String("start-cmd"),
+						Envs:           cmd.StringSlice("env"),
+						BuildVariables: cmd.StringSlice("build-variable"),
+						Variables:      cmd.StringSlice("variable"),
+						Secrets:        cmd.StringSlice("secret"),
 					})
 				},
 			},

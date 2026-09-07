@@ -1,11 +1,25 @@
 package buildkit
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/moby/buildkit/client/llb"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 )
+
+// repo is a valid repository URL, required by every config.
+const repo = "https://github.com/user/repo.git"
+
+// mustSpec normalizes a config, failing the test if it does not validate.
+func mustSpec(t *testing.T, config Config) BuildSpec {
+	t.Helper()
+	spec, err := newBuildSpec(config)
+	if err != nil {
+		t.Fatalf("newBuildSpec() = %v, want no error", err)
+	}
+	return spec
+}
 
 func TestFetchGitSource(t *testing.T) {
 	config := Config{
@@ -13,7 +27,7 @@ func TestFetchGitSource(t *testing.T) {
 		Ref:  "abc123",
 	}
 
-	state := fetchGitSource(config)
+	state := fetchGitSource(mustSpec(t, config))
 
 	// Verify state can be marshaled (basic sanity check)
 	_, err := state.Marshal(t.Context(), llb.Platform(specs.Platform{OS: "linux", Architecture: "amd64"}))
@@ -29,7 +43,7 @@ func TestFetchGitSourceWithContext(t *testing.T) {
 		Context: "apps/web",
 	}
 
-	state := fetchGitSource(config)
+	state := fetchGitSource(mustSpec(t, config))
 
 	_, err := state.Marshal(t.Context(), llb.Platform(specs.Platform{OS: "linux", Architecture: "amd64"}))
 	if err != nil {
@@ -44,7 +58,7 @@ func TestFetchGitSourceWithAuth(t *testing.T) {
 		AuthSecret: "GIT_AUTH_TOKEN",
 	}
 
-	state := fetchGitSource(config)
+	state := fetchGitSource(mustSpec(t, config))
 
 	_, err := state.Marshal(t.Context(), llb.Platform(specs.Platform{OS: "linux", Architecture: "amd64"}))
 	if err != nil {
@@ -60,12 +74,13 @@ func TestBuildPlanArgs(t *testing.T) {
 	}{
 		{
 			name:   "basic",
-			config: Config{},
+			config: Config{Repo: repo},
 			want:   []string{"sugapack", "plan", "/src", "--out", "/out/plan.json"},
 		},
 		{
 			name: "with build cmd",
 			config: Config{
+				Repo:     repo,
 				Railpack: RailpackConfig{BuildCmd: "npm run build"},
 			},
 			want: []string{"sugapack", "plan", "/src", "--out", "/out/plan.json", "--build-cmd", "npm run build"},
@@ -73,6 +88,7 @@ func TestBuildPlanArgs(t *testing.T) {
 		{
 			name: "with start cmd",
 			config: Config{
+				Repo:     repo,
 				Railpack: RailpackConfig{StartCmd: "npm start"},
 			},
 			want: []string{"sugapack", "plan", "/src", "--out", "/out/plan.json", "--start-cmd", "npm start"},
@@ -80,6 +96,7 @@ func TestBuildPlanArgs(t *testing.T) {
 		{
 			name: "with both",
 			config: Config{
+				Repo:     repo,
 				Railpack: RailpackConfig{BuildCmd: "make", StartCmd: "./server"},
 			},
 			want: []string{"sugapack", "plan", "/src", "--out", "/out/plan.json", "--build-cmd", "make", "--start-cmd", "./server"},
@@ -88,7 +105,7 @@ func TestBuildPlanArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildPlanArgs(tt.config)
+			got := buildPlanArgs(mustSpec(t, tt.config))
 			if len(got) != len(tt.want) {
 				t.Fatalf("buildPlanArgs() = %v, want %v", got, tt.want)
 			}
@@ -96,6 +113,60 @@ func TestBuildPlanArgs(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Errorf("buildPlanArgs()[%d] = %q, want %q", i, got[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+// Each kind of variable reaches the plan step through its own flag, and every
+// list is sorted so map iteration order cannot change the step's cache key
+// between builds.
+func TestBuildPlanArgsPerVersion(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		want   []string
+	}{
+		{
+			name: "legacy envs",
+			config: Config{
+				Repo:     repo,
+				Railpack: RailpackConfig{Envs: map[string]string{"B": "2", "A": "1"}},
+			},
+			want: []string{"--env", "A=1", "--env", "B=2"},
+		},
+		{
+			name: "current fields",
+			config: Config{
+				Repo:    repo,
+				Version: VersionCurrent,
+				Railpack: RailpackConfig{
+					BuildVariables: map[string]string{"B_BUILD": "2", "A_BUILD": "1"},
+					Variables:      map[string]string{"B_VAR": "2", "A_VAR": "1"},
+					Secrets:        []string{"Z_SECRET", "A_SECRET", "A_SECRET"},
+				},
+			},
+			want: []string{
+				"--build-variable", "A_BUILD=1", "--build-variable", "B_BUILD=2",
+				"--variable", "A_VAR=1", "--variable", "B_VAR=2",
+				"--secret", "A_SECRET", "--secret", "Z_SECRET",
+			},
+		},
+	}
+
+	base := []string{"sugapack", "plan", "/src", "--out", "/out/plan.json"}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := mustSpec(t, tt.config)
+			want := append(slices.Clone(base), tt.want...)
+
+			got := buildPlanArgs(spec)
+			if !slices.Equal(got, want) {
+				t.Errorf("buildPlanArgs() = %v, want %v", got, want)
+			}
+			if !slices.Equal(got, buildPlanArgs(spec)) {
+				t.Error("buildPlanArgs() is not deterministic")
 			}
 		})
 	}

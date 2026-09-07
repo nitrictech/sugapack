@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/moby/buildkit/client/llb"
@@ -33,31 +35,30 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	if config.Repo == "" {
-		return nil, fmt.Errorf("repo is required in config")
-	}
-	if config.Ref == "" {
-		config.Ref = "main"
+	spec, err := newBuildSpec(config)
+	if err != nil {
+		return nil, err
 	}
 
 	platform := parsePlatform(opts)
 
 	// Phase 1: Fetch source via git
-	sourceState := fetchGitSource(config)
+	sourceState := fetchGitSource(spec)
 
 	// Phase 2: Run railpack plan on the fetched source
-	buildPlan, err := generatePlan(ctx, c, sourceState, config, platform)
+	buildPlan, err := generatePlan(ctx, c, sourceState, spec, platform)
 	if err != nil {
 		return nil, fmt.Errorf("generating plan: %w", err)
 	}
 
 	// Phase 3: Convert plan to LLB using git source (not local context)
 	finalState, image, err := convertPlanToLLB(buildPlan, sourceState, convertOptions{
-		Platform:    platform,
-		SecretsHash: opts["build-arg:secrets-hash"],
-		CacheKey:    opts["build-arg:cache-key"],
-		GitHubToken: opts["build-arg:github-token"],
-		NoCache:     noCacheRequested(opts),
+		Platform:           platform,
+		SecretsHash:        opts["build-arg:secrets-hash"],
+		CacheKey:           opts["build-arg:cache-key"],
+		GitHubToken:        opts["build-arg:github-token"],
+		NoCache:            noCacheRequested(opts),
+		BuildVariableNames: spec.buildVariableNames(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("converting plan to LLB: %w", err)
@@ -123,35 +124,35 @@ func readConfig(ctx context.Context, c client.Client, opts map[string]string) ([
 
 // fetchGitSource creates the LLB state for fetching source from git.
 // If a context subdirectory is specified, it scopes the source to that directory.
-func fetchGitSource(config Config) llb.State {
+func fetchGitSource(spec BuildSpec) llb.State {
 	gitOpts := []llb.GitOption{
-		llb.WithCustomNamef("[sugapack] fetching %s@%s", config.Repo, config.Ref),
+		llb.WithCustomNamef("[sugapack] fetching %s@%s", spec.Repo, spec.Ref),
 	}
-	if config.AuthSecret != "" {
-		gitOpts = append(gitOpts, llb.AuthTokenSecret(config.AuthSecret))
+	if spec.AuthSecret != "" {
+		gitOpts = append(gitOpts, llb.AuthTokenSecret(spec.AuthSecret))
 	}
 
-	gitState := llb.Git(config.Repo, config.Ref, gitOpts...)
+	gitState := llb.Git(spec.Repo, spec.Ref, gitOpts...)
 
-	if config.Context == "" {
+	if spec.Context == "" {
 		return gitState
 	}
 
 	// Extract the context subdirectory into a clean root
 	return llb.Scratch().File(
-		llb.Copy(gitState, config.Context+"/.", "/", &llb.CopyInfo{
+		llb.Copy(gitState, spec.Context+"/.", "/", &llb.CopyInfo{
 			CreateDestPath:      true,
 			CopyDirContentsOnly: true,
 			AllowWildcard:       true,
 		}),
-		llb.WithCustomNamef("[sugapack] extracting context %s", config.Context),
+		llb.WithCustomNamef("[sugapack] extracting context %s", spec.Context),
 	)
 }
 
 // generatePlan runs `sugapack plan` (embedded railpack) on the git-fetched source.
 // The binary calls core.GenerateBuildPlan() as a Go library — no separate railpack CLI needed.
-func generatePlan(ctx context.Context, c client.Client, sourceState llb.State, config Config, platform specs.Platform) (*plan.BuildPlan, error) {
-	planArgs := buildPlanArgs(config)
+func generatePlan(ctx context.Context, c client.Client, sourceState llb.State, spec BuildSpec, platform specs.Platform) (*plan.BuildPlan, error) {
+	planArgs := buildPlanArgs(spec)
 
 	runOpts := []llb.RunOption{
 		llb.Args(planArgs),
@@ -203,16 +204,34 @@ func generatePlan(ctx context.Context, c client.Client, sourceState llb.State, c
 }
 
 // buildPlanArgs constructs the args for the embedded plan subcommand.
-func buildPlanArgs(config Config) []string {
+//
+// Every list is sorted: Go's map iteration order would otherwise reshuffle the
+// args between builds and change the plan step's cache key with them, so plan
+// generation would never hit cache.
+func buildPlanArgs(spec BuildSpec) []string {
 	args := []string{"sugapack", "plan", "/src", "--out", "/out/plan.json"}
-	if config.Railpack.BuildCmd != "" {
-		args = append(args, "--build-cmd", config.Railpack.BuildCmd)
+	if spec.BuildCmd != "" {
+		args = append(args, "--build-cmd", spec.BuildCmd)
 	}
-	if config.Railpack.StartCmd != "" {
-		args = append(args, "--start-cmd", config.Railpack.StartCmd)
+	if spec.StartCmd != "" {
+		args = append(args, "--start-cmd", spec.StartCmd)
 	}
-	for k, v := range config.Railpack.Envs {
-		args = append(args, "-e", k+"="+v)
+	args = append(args, assignmentArgs("--env", spec.LegacyEnvs)...)
+	args = append(args, assignmentArgs("--build-variable", spec.BuildVariables)...)
+	args = append(args, assignmentArgs("--variable", spec.Variables)...)
+	// Names only. A secret's value reaches the build steps through BuildKit,
+	// so it never has to pass through the plan step.
+	for _, name := range slices.Compact(slices.Sorted(slices.Values(spec.Secrets))) {
+		args = append(args, "--secret", name)
+	}
+	return args
+}
+
+// assignmentArgs renders vars as repeated `flag KEY=VALUE` pairs, in name order.
+func assignmentArgs(flag string, vars map[string]string) []string {
+	args := make([]string, 0, len(vars)*2)
+	for _, name := range slices.Sorted(maps.Keys(vars)) {
+		args = append(args, flag, name+"="+vars[name])
 	}
 	return args
 }

@@ -30,7 +30,19 @@ type Options struct {
 	OutputFile string
 	BuildCmd   string
 	StartCmd   string
-	Envs       []string
+	// Envs are KEY=VALUE variables whose names stay in the plan's secret
+	// list, so BuildKit mounts each into the build steps and the caller must
+	// supply a matching `--secret id=NAME`. The legacy schema's only channel.
+	Envs []string
+	// BuildVariables are KEY=VALUE variables available to plan generation
+	// and to every build step, by value. Not baked into the image.
+	BuildVariables []string
+	// Variables are KEY=VALUE variables baked into the final image's
+	// environment, so they must not hold anything sensitive.
+	Variables []string
+	// Secrets name build-time secrets. Values are not passed here: railpack
+	// only needs the name to declare the secret in the plan.
+	Secrets []string
 }
 
 // Run runs railpack plan generation as a Go library call
@@ -41,7 +53,7 @@ func Run(opts Options) error {
 		return fmt.Errorf("creating app: %w", err)
 	}
 
-	env, err := app.FromEnvs(opts.Envs)
+	env, err := buildEnvironment(opts)
 	if err != nil {
 		return fmt.Errorf("creating environment: %w", err)
 	}
@@ -66,6 +78,8 @@ func Run(opts Options) error {
 
 	fmt.Fprintf(os.Stderr, "[info] planned with railpack %s (providers: %s)\n",
 		result.RailpackVersion, providerSummary(result.DetectedProviders))
+
+	applyToPlan(result.Plan, env, opts)
 
 	planBytes, err := json.MarshalIndent(result.Plan, "", "  ")
 	if err != nil {

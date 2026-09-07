@@ -63,6 +63,7 @@ The "Dockerfile" input is a JSON config:
 
 ```json
 {
+  "version": 1,
   "repo": "https://github.com/user/repo.git",
   "ref": "abc123def",
   "context": "apps/web",
@@ -70,22 +71,53 @@ The "Dockerfile" input is a JSON config:
   "railpack": {
     "buildCmd": "npm run build",
     "startCmd": "npm start",
-    "envs": {
-      "NODE_ENV": "production"
-    }
+    "buildVariables": { "VITE_API_URL": "https://api.example.com" },
+    "variables": { "GIT_SHA": "abc123def" },
+    "secrets": ["DATABASE_URL"]
   }
 }
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
+| `version` | no | Schema version. Omitted means `0`, the legacy schema. |
 | `repo` | yes | Git repository URL (HTTPS) |
 | `ref` | no | Commit SHA, branch, or tag (default: `main`) |
 | `context` | no | Subdirectory within the repo to use as build context |
 | `authSecret` | no | BuildKit secret ID containing a git auth token |
 | `railpack.buildCmd` | no | Override the build command |
 | `railpack.startCmd` | no | Override the start command |
-| `railpack.envs` | no | Additional environment variables for plan generation |
+
+### Variables and secrets (`version: 1`)
+
+| Field | Value comes from | Reaches | In the image | In step cache keys |
+|-------|------------------|---------|--------------|--------------------|
+| `railpack.buildVariables` | this config | plan generation and every build step | no | yes |
+| `railpack.variables` | this config | the final image's environment | yes | no |
+| `railpack.secrets` | `--secret id=NAME` | every build step | no | no |
+
+`buildVariables` also carries railpack's own knobs — `RAILPACK_PACKAGES` and
+friends — since it is what feeds plan generation.
+
+`secrets` lists names only; values never appear in this config or in the image.
+Each name needs a matching `--secret id=NAME,env=NAME` or the build fails with
+`secret NAME: not found`. BuildKit keeps secrets out of its cache keys, so pass
+`--build-arg secrets-hash=<hash of the values>` too, or a changed secret will
+reuse the layer that baked the old one.
+
+A name may appear in both `buildVariables` and `variables` when a value is
+needed at build time and at runtime. A name cannot be both a secret and either
+kind of variable.
+
+### The legacy schema (`version: 0`)
+
+Version 0 has a single `railpack.envs` map, which conflates the three. Its
+values steer plan generation, while its *names* become plan secrets — so the
+caller supplies the value a second time through `--secret id=NAME`, and that is
+the one the build steps see. It reaches neither the image nor `deploy`.
+
+It is kept so the frontend image can roll forward ahead of its callers. Mixing
+fields across versions is rejected rather than guessed at.
 
 ## Local development
 

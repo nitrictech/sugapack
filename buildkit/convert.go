@@ -20,6 +20,9 @@ type convertOptions struct {
 	CacheKey    string
 	GitHubToken string
 	NoCache     bool
+	// BuildVariableNames are variables the caller wants during the build but
+	// not in the final image. See buildImageEnv.
+	BuildVariableNames []string
 }
 
 // Image is the OCI image config attached to the build result.
@@ -67,7 +70,7 @@ func convertPlanToLLB(bp *plan.BuildPlan, sourceState llb.State, opts convertOpt
 		},
 		Variant: platform.Variant,
 		Config: specs.ImageConfig{
-			Env:        buildImageEnv(graphOutput, bp),
+			Env:        buildImageEnv(graphOutput, bp, opts.BuildVariableNames),
 			WorkingDir: planner.WorkingDir,
 			Entrypoint: []string{"/bin/bash", "-c"},
 			Cmd:        []string{startCommand},
@@ -79,7 +82,13 @@ func convertPlanToLLB(bp *plan.BuildPlan, sourceState llb.State, opts convertOpt
 
 // buildImageEnv constructs the final environment variable list for the image,
 // merging graph output env, deploy variables, and PATH.
-func buildImageEnv(graphOutput *build_llb.BuildGraphOutput, bp *plan.BuildPlan) []string {
+//
+// buildVariableNames are dropped from the graph env on the way through.
+// railpack copies a step's variables into its output environment, which
+// propagates to child steps and on into here, so a build variable would
+// otherwise end up in the image — the opposite of what it means. A name that
+// is also a deploy variable survives, because the deploy merge comes after.
+func buildImageEnv(graphOutput *build_llb.BuildGraphOutput, bp *plan.BuildPlan, buildVariableNames []string) []string {
 	paths := []string{}
 	paths = append(paths, bp.Deploy.Paths...)
 	paths = append(paths, graphOutput.GraphEnv.PathList...)
@@ -89,6 +98,9 @@ func buildImageEnv(graphOutput *build_llb.BuildGraphOutput, bp *plan.BuildPlan) 
 
 	envMap := make(map[string]string, len(graphOutput.GraphEnv.EnvVars)+len(bp.Deploy.Variables)+1)
 	maps.Copy(envMap, graphOutput.GraphEnv.EnvVars)
+	for _, name := range buildVariableNames {
+		delete(envMap, name)
+	}
 	maps.Copy(envMap, bp.Deploy.Variables)
 	envMap["PATH"] = pathString
 
